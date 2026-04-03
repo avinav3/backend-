@@ -31,6 +31,7 @@ const UserDataSchema = new Schema(
     status: { type: String, default: "active", required: true },
     createdAt: { type: Date, default: Date.now },
     lastLogin: { type: Date },
+    refreshToken: { type: String, default: null },
   },
   {
     timestamps: true,

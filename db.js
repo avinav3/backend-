@@ -3,6 +3,8 @@ const fs = require("fs");
 const path = require("path");
 const mongoose = require("mongoose");
 
+mongoose.set("bufferCommands", false);
+
 function loadEnvFile() {
   const envPath = path.join(__dirname, ".env");
 
@@ -38,6 +40,10 @@ loadEnvFile();
 
 const uri = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/carRental";
 
+function isDatabaseConnected() {
+  return mongoose.connection.readyState === 1;
+}
+
 mongoose
   .connect(uri, {
     serverSelectionTimeoutMS: 5000,
@@ -49,7 +55,7 @@ mongoose
   .catch((error) => {
     console.error("Error connecting to MongoDB:", error.message);
     console.error(
-      "Check whether MongoDB is running, whether MONGO_URI is correct, and whether authentication/network access is configured properly."
+      "Check whether MongoDB is running, whether MONGO_URI is correct, and whether authentication/network access is configured properly.",
     );
   });
 
@@ -65,4 +71,7 @@ mongoose.connection.on("disconnected", () => {
   console.log("Mongoose disconnected");
 });
 
-module.exports = mongoose;
+module.exports = {
+  mongoose,
+  isDatabaseConnected,
+};

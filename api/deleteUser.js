@@ -1,10 +1,11 @@
 const express = require('express');
 const Users = require('../models/Users');  // Assuming Users is your Mongoose model
+const { authenticateAccessToken, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
 
 // Delete user by _id
-router.delete('/deleteUser/:id', async (req, res) => {
+router.delete('/deleteUser/:id', authenticateAccessToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const deletedUser = await Users.findByIdAndDelete(id);

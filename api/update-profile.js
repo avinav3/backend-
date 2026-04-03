@@ -1,19 +1,16 @@
 //api/update-profile.js
 const express = require('express');
 const Users = require('../models/Users');
+const { authenticateAccessToken, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
 
 // update-profile.js
-router.get('/get-profile', async (req, res) => {
-  const { id } = req.query;
-
-  if (!id) {
-    return res.status(400).json({ flag: "0", message: "User ID is required." });
-  }
+router.get('/get-profile', authenticateAccessToken, async (req, res) => {
+  const targetId = req.auth.role === 'admin' && req.query.id ? req.query.id : req.auth.id;
 
   try {
-    const user = await Users.findById(id, 'name email mobile createdAt lastLogin');
+    const user = await Users.findById(targetId, 'name email mobile createdAt lastLogin role status');
     if (user) {
       return res.json(user);
     } else {
@@ -26,15 +23,16 @@ router.get('/get-profile', async (req, res) => {
 });
 
 
-router.post('/update-profile', async (req, res) => {
+router.post('/update-profile', authenticateAccessToken, async (req, res) => {
   const { id, name, email, mobile } = req.body;
+  const targetId = req.auth.role === 'admin' && id ? id : req.auth.id;
 
-  if (!id || !name || !email || !mobile) {
+  if (!name || !email || !mobile) {
     return res.status(400).json({ flag: "0", message: "All fields are required." });
   }
 
   try {
-    const user = await Users.findById(id);
+    const user = await Users.findById(targetId);
     if (user) {
       user.name = name;
       user.email = email;
@@ -51,7 +49,7 @@ router.post('/update-profile', async (req, res) => {
   }
 });
 
-router.get('/get-users', async (req, res) => {
+router.get('/get-users', authenticateAccessToken, requireAdmin, async (req, res) => {
   try {
     const users = await Users.find({}, 'name email mobile role status lastLogin');
     res.status(200).json(users);
@@ -61,7 +59,7 @@ router.get('/get-users', async (req, res) => {
   }
 });
 
-router.post('/suspend-user', async (req, res) => {
+router.post('/suspend-user', authenticateAccessToken, requireAdmin, async (req, res) => {
   const { id } = req.body;
   try {
     const user = await Users.findById(id);
