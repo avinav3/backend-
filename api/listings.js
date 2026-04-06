@@ -9,6 +9,88 @@ const Review = require("../models/Review");
 const TestDrive = require("../models/TestDrive"); // adjust path if needed
 const router = express.Router();
 
+function hasOwnValue(source, key) {
+  return Object.prototype.hasOwnProperty.call(source, key);
+}
+
+function getFirstProvidedValue(source, keys) {
+  for (const key of keys) {
+    if (hasOwnValue(source, key)) {
+      return source[key];
+    }
+  }
+
+  return undefined;
+}
+
+function normalizeOptionalString(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  return String(value).trim();
+}
+
+function normalizeOptionalNumber(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null || value === "") {
+    return null;
+  }
+
+  const parsedValue = Number(value);
+  return Number.isNaN(parsedValue) ? undefined : parsedValue;
+}
+
+function buildListingPayload(body) {
+  const listingPayload = { ...body };
+
+  const location = getFirstProvidedValue(body, ["location", "Location"]);
+  const engine = getFirstProvidedValue(body, ["engine", "Engine"]);
+  const seatingCapacity = getFirstProvidedValue(body, [
+    "seatingCapacity",
+    "seating_capacity",
+    "seating",
+  ]);
+  const exteriorColor = getFirstProvidedValue(body, [
+    "exteriorColor",
+    "exterior_color",
+  ]);
+  const interiorColor = getFirstProvidedValue(body, [
+    "interiorColor",
+    "interior_color",
+  ]);
+
+  // ## Normalize the admin form payload so these fields survive create and edit flows.
+  if (location !== undefined) {
+    listingPayload.location = normalizeOptionalString(location);
+  }
+
+  if (engine !== undefined) {
+    listingPayload.engine = normalizeOptionalString(engine);
+  }
+
+  if (seatingCapacity !== undefined) {
+    listingPayload.seatingCapacity = normalizeOptionalNumber(seatingCapacity);
+  }
+
+  if (exteriorColor !== undefined) {
+    listingPayload.exteriorColor = normalizeOptionalString(exteriorColor);
+  }
+
+  if (interiorColor !== undefined) {
+    listingPayload.interiorColor = normalizeOptionalString(interiorColor);
+  }
+
+  return listingPayload;
+}
+
 // Set up storage engine for multer
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -53,11 +135,13 @@ router.post("/listings", upload, async (req, res) => {
       filename: file.filename,
     }));
 
+    const listingPayload = buildListingPayload(req.body);
+
     const newCarListing = new CarListing({
-      ...req.body,
+      ...listingPayload,
       images: imagePaths,
       auctionEndTime:
-        req.body.RentList === "Auction"
+        listingPayload.RentList === "Auction"
           ? new Date(Date.now() + 2 * 60 * 1000)
           : null,
     });
@@ -139,7 +223,7 @@ router.put("/listings/:id", upload, async (req, res) => {
 
     // Update listing fields
     const updatedFields = {
-      ...req.body,
+      ...buildListingPayload(req.body),
       date_updated: Date.now(),
     };
 

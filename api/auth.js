@@ -37,6 +37,7 @@ function sanitizeAccount(account, accountType) {
     email: account.email,
     role: account.role || (accountType === "admin" ? "admin" : "user"),
     accountType,
+    profileImage: account.profileImage || null,
   };
 }
 

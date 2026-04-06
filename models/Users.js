@@ -32,6 +32,7 @@ const UserDataSchema = new Schema(
     createdAt: { type: Date, default: Date.now },
     lastLogin: { type: Date },
     refreshToken: { type: String, default: null },
+    profileImage: { type: String, default: null },
   },
   {
     timestamps: true,
