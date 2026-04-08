@@ -19,12 +19,12 @@ const PaymentSchema = new mongoose.Schema(
     },
     payment_method: {
       type: String,
-      enum: ["credit_card", "debit_card", "upi", "paypal"],
+      enum: ["credit_card", "debit_card", "upi", "paypal", "khalti"],
       required: true,
     },
     payment_status: {
       type: String,
-      enum: ["pending", "success", "failed", "refunded"],
+      enum: ["pending", "success", "paid", "failed", "cancelled", "refunded"],
       default: "pending",
     },
     date_of_payment: {
@@ -38,6 +38,39 @@ const PaymentSchema = new mongoose.Schema(
     booking_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Booking",
+    },
+    booking_reference: {
+      type: Number,
+      required: false,
+      index: true,
+    },
+    order_reference: {
+      type: String,
+      required: false,
+      trim: true,
+    },
+    transactionUuid: {
+      type: String,
+      required: false,
+      unique: true,
+      sparse: true,
+      trim: true,
+    },
+    khaltiPidx: {
+      type: String,
+      required: false,
+      unique: true,
+      sparse: true,
+      trim: true,
+    },
+    khaltiTransactionId: {
+      type: String,
+      required: false,
+      trim: true,
+    },
+    paidAt: {
+      type: Date,
+      required: false,
     },
     additional_details: {
       type: mongoose.Schema.Types.Mixed,

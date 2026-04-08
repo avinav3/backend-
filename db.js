@@ -5,6 +5,10 @@ const mongoose = require("mongoose");
 
 mongoose.set("bufferCommands", false);
 
+const DEFAULT_RETRY_DELAY_MS = Number(process.env.MONGO_RETRY_DELAY_MS || 5000);
+let reconnectTimer = null;
+let isConnecting = false;
+
 function loadEnvFile() {
   const envPath = path.join(__dirname, ".env");
 
@@ -44,22 +48,58 @@ function isDatabaseConnected() {
   return mongoose.connection.readyState === 1;
 }
 
-mongoose
-  .connect(uri, {
-    serverSelectionTimeoutMS: 5000,
-  })
-  .then(() => {
+function clearReconnectTimer() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer || isDatabaseConnected() || isConnecting) {
+    return;
+  }
+
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectWithRetry();
+  }, DEFAULT_RETRY_DELAY_MS);
+
+  if (typeof reconnectTimer.unref === "function") {
+    reconnectTimer.unref();
+  }
+}
+
+async function connectWithRetry() {
+  if (isConnecting || isDatabaseConnected()) {
+    return;
+  }
+
+  isConnecting = true;
+
+  try {
+    await mongoose.connect(uri, {
+      serverSelectionTimeoutMS: 5000,
+    });
+
+    clearReconnectTimer();
     console.log("Connected to MongoDB successfully");
     console.log(`MongoDB URI: ${uri}`);
-  })
-  .catch((error) => {
+  } catch (error) {
     console.error("Error connecting to MongoDB:", error.message);
     console.error(
       "Check whether MongoDB is running, whether MONGO_URI is correct, and whether authentication/network access is configured properly.",
     );
-  });
+    scheduleReconnect();
+  } finally {
+    isConnecting = false;
+  }
+}
+
+connectWithRetry();
 
 mongoose.connection.on("connected", () => {
+  clearReconnectTimer();
   console.log("Mongoose connected to db");
 });
 
@@ -69,9 +109,11 @@ mongoose.connection.on("error", (err) => {
 
 mongoose.connection.on("disconnected", () => {
   console.log("Mongoose disconnected");
+  scheduleReconnect();
 });
 
 module.exports = {
   mongoose,
   isDatabaseConnected,
+  connectWithRetry,
 };

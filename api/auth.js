@@ -58,10 +58,18 @@ async function issueTokensAndPersist(account, accountType) {
 }
 
 async function handleLogin(req, res, options) {
-  const { email, password } = req.body;
+  const email = String(req.body.email || "").trim().toLowerCase();
+  const password = String(req.body.password || "");
 
   if (!ensureDatabaseConnection(res)) {
     return;
+  }
+
+  if (!email || !password) {
+    return res.status(400).json({
+      flag: "0",
+      message: "Email and password are required.",
+    });
   }
 
   try {

@@ -9,7 +9,10 @@ function extractAccessToken(req) {
   return (
     bearerToken ||
     req.headers["x-access-token"] ||
+    req.headers["access-token"] ||
     req.cookies?.[ACCESS_COOKIE_NAME] ||
+    req.query?.accessToken ||
+    req.query?.token ||
     req.body?.accessToken ||
     req.body?.token ||
     null
