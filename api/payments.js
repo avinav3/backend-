@@ -4,6 +4,11 @@ const Payment = require("../models/Payment");
 const User = require("../models/Users"); // Adjust path as needed
 const Booking = require("../models/Booking");
 const { authenticateAccessToken } = require("../middleware/auth");
+const {
+  extractBidIntentFromPayload,
+  findListingByIdentifier,
+  verifyAcceptedBidAccess,
+} = require("../utils/bidApproval");
 // const Payment = require('../models/payment');
 const ObjectId = require("mongodb").ObjectId;
 const router = express.Router();
@@ -112,6 +117,77 @@ async function updateBookingFromPayment(payment, normalizedStatus) {
   return booking;
 }
 
+function resolveListingStatusFromPurpose(purpose) {
+  return String(purpose || "").trim().toLowerCase() === "rent" ? "rented" : "sold";
+}
+
+async function finalizeCheckoutFromPayment(payment) {
+  const paymentDetails = payment.additional_details || {};
+  const listingIdentifier =
+    paymentDetails.listingId ??
+    paymentDetails.listing_id ??
+    paymentDetails.carId ??
+    paymentDetails.car_id;
+
+  if (!listingIdentifier) {
+    return null;
+  }
+
+  const listing = await findListingByIdentifier(listingIdentifier);
+  if (!listing) {
+    return null;
+  }
+
+  const transactionReference = payment.transactionUuid || payment.transaction_id;
+  let booking = await Booking.findOne({ transaction_id: transactionReference });
+  const paidPrice =
+    normalizeAmount(paymentDetails.paidPrice) ??
+    normalizeAmount(payment.amount?.toString?.()) ??
+    normalizeAmount(payment.amount);
+  const totalPrice =
+    normalizeAmount(paymentDetails.totalPrice) ??
+    normalizeAmount(paymentDetails.total_price) ??
+    paidPrice;
+  const purpose = String(paymentDetails.purpose || "buy").trim().toLowerCase() || "buy";
+
+  if (!booking) {
+    booking = new Booking({
+      listing_id: listing.listing_id,
+      user_id: String(payment.user_id || ""),
+      car_id: listing.listing_id,
+      booking_start_date: new Date(),
+      booking_end_date: new Date(),
+      total_price: totalPrice,
+      paid_price: paidPrice,
+      transaction_id: transactionReference,
+      booking_status: "confirmed",
+      payment_status: "paid",
+      purpose,
+    });
+  } else {
+    booking.listing_id = listing.listing_id;
+    booking.car_id = listing.listing_id;
+    booking.booking_status = "confirmed";
+    booking.payment_status = "paid";
+    booking.purpose = purpose;
+    if (paidPrice !== null) {
+      booking.paid_price = paidPrice;
+    }
+    if (totalPrice !== null) {
+      booking.total_price = totalPrice;
+    }
+  }
+
+  await booking.save();
+
+  if (listing.listing_status !== resolveListingStatusFromPurpose(purpose)) {
+    listing.listing_status = resolveListingStatusFromPurpose(purpose);
+    await listing.save();
+  }
+
+  return booking;
+}
+
 // Initiate Khalti payment from the backend using Khalti's server-side
 // `/epayment/initiate/` API so the secret key stays off the frontend.
 router.post("/khalti/initiate", authenticateAccessToken, async (req, res) => {
@@ -151,6 +227,31 @@ router.post("/khalti/initiate", authenticateAccessToken, async (req, res) => {
       }
     }
 
+    const bidIntent = extractBidIntentFromPayload(req.body);
+    if (bidIntent.wantsBidValidation) {
+      const bidApproval = await verifyAcceptedBidAccess({
+        userId: req.auth.id,
+        listingIdentifier:
+          bidIntent.listingIdentifier ||
+          booking?.listing_id ||
+          booking?.car_id ||
+          req.body.listingId ||
+          req.body.listing_id,
+        mode: bidIntent.mode || booking?.purpose,
+        expectedAmount:
+          bidIntent.requestedPrice ??
+          normalizeAmount(booking?.paid_price) ??
+          normalizeAmount(booking?.total_price),
+      });
+
+      if (!bidApproval.ok) {
+        return res.status(bidApproval.statusCode).json({
+          flag: "0",
+          message: bidApproval.message,
+        });
+      }
+    }
+
     const requestedAmount =
       normalizeAmount(req.body.amount) ??
       normalizeAmount(booking?.paid_price) ??
@@ -169,7 +270,7 @@ router.post("/khalti/initiate", authenticateAccessToken, async (req, res) => {
       bookingReference
         ? `BOOKING-${bookingReference}`
         : orderReference
-          ? `ORDER-${orderReference}`
+          ? String(orderReference)
           : `PAY-${Date.now()}`;
     const purchaseOrderName =
       req.body.purchase_order_name ||
@@ -238,6 +339,24 @@ router.post("/khalti/initiate", authenticateAccessToken, async (req, res) => {
         khaltiInitiate: responseData,
         purchase_order_id: purchaseOrderId,
         purchase_order_name: purchaseOrderName,
+        listingId: req.body.listingId ?? req.body.listing_id ?? null,
+        listing_id: req.body.listing_id ?? req.body.listingId ?? null,
+        purpose: req.body.purpose ?? req.body.mode ?? null,
+        pricingType:
+          req.body.pricingType ??
+          req.body.pricingSource ??
+          req.body.priceSource ??
+          null,
+        bidId: req.body.bidId ?? req.body.bid_id ?? null,
+        bid_id: req.body.bid_id ?? req.body.bidId ?? null,
+        approvedPrice:
+          req.body.approvedPrice ?? req.body.approved_bid_price ?? null,
+        approved_bid_price:
+          req.body.approved_bid_price ?? req.body.approvedPrice ?? null,
+        totalPrice: req.body.totalPrice ?? req.body.total_price ?? null,
+        total_price: req.body.total_price ?? req.body.totalPrice ?? null,
+        paidPrice: req.body.paidPrice ?? requestedAmount ?? null,
+        paid_price: req.body.paid_price ?? req.body.paidPrice ?? requestedAmount ?? null,
       },
     });
 
@@ -346,10 +465,14 @@ router.get("/khalti/verify", async (req, res) => {
     };
 
     await payment.save();
-    const booking = await updateBookingFromPayment(
+    let booking = await updateBookingFromPayment(
       payment,
       normalizedStatus === "COMPLETED" ? "COMPLETE" : normalizedStatus,
     );
+
+    if (!booking && normalizedStatus === "COMPLETED") {
+      booking = await finalizeCheckoutFromPayment(payment);
+    }
 
     const responsePayload = {
       flag: normalizedStatus === "COMPLETED" ? "1" : "0",

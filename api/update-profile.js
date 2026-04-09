@@ -92,6 +92,92 @@ router.post("/update-profile", authenticateAccessToken, async (req, res) => {
   }
 });
 
+router.get("/settings", authenticateAccessToken, async (req, res) => {
+  try {
+    const user = await Users.findById(req.auth.id).select(
+      "name email mobile createdAt lastLogin role status profileImage",
+    );
+
+    if (!user) {
+      return res.status(404).json({ flag: "0", message: "User not found." });
+    }
+
+    return res.status(200).json({
+      flag: "1",
+      settings: buildUserResponse(user),
+    });
+  } catch (error) {
+    console.error("Error fetching settings: ", error);
+    return res.status(500).json({ flag: "0", message: "Database error" });
+  }
+});
+
+async function handleSettingsUpdate(req, res) {
+  const name =
+    req.body.name === undefined ? undefined : String(req.body.name).trim();
+  const email =
+    req.body.email === undefined
+      ? undefined
+      : String(req.body.email).trim().toLowerCase();
+  const mobile =
+    req.body.mobile === undefined
+      ? undefined
+      : String(req.body.mobile).trim();
+
+  if (name !== undefined && !name) {
+    return res.status(400).json({ flag: "0", message: "Name cannot be empty." });
+  }
+
+  if (email !== undefined && !email) {
+    return res.status(400).json({ flag: "0", message: "Email cannot be empty." });
+  }
+
+  if (mobile !== undefined && !mobile) {
+    return res.status(400).json({ flag: "0", message: "Mobile cannot be empty." });
+  }
+
+  try {
+    const user = await Users.findById(req.auth.id);
+
+    if (!user) {
+      return res.status(404).json({ flag: "0", message: "User not found." });
+    }
+
+    if (name !== undefined) {
+      user.name = name;
+    }
+
+    if (email !== undefined) {
+      user.email = email;
+    }
+
+    if (mobile !== undefined) {
+      user.mobile = mobile;
+    }
+
+    await user.save();
+
+    return res.status(200).json({
+      flag: "1",
+      message: "Settings updated successfully.",
+      settings: buildUserResponse(user),
+    });
+  } catch (error) {
+    console.error("Error updating settings: ", error);
+    if (error?.code === 11000) {
+      return res.status(409).json({
+        flag: "0",
+        message: "An account with this email already exists.",
+      });
+    }
+
+    return res.status(500).json({ flag: "0", message: "Database error" });
+  }
+}
+
+router.patch("/settings", authenticateAccessToken, handleSettingsUpdate);
+router.put("/settings", authenticateAccessToken, handleSettingsUpdate);
+
 router.post(
   "/upload-profile-image",
   authenticateAccessToken,

@@ -55,11 +55,13 @@ router.post('/change-password', authenticateAccessToken, async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(npass, 10);
     user.password = hashedPassword;
+    user.refreshToken = null;
     await user.save();
 
     return res.status(200).json({
       flag: "1",
       message: "Password changed successfully.",
+      requireReLogin: true,
     });
   } catch (error) {
     console.error("Error changing password: ", error);

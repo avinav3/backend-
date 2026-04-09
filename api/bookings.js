@@ -5,9 +5,29 @@ const User = require("../models/Users"); // Adjust path as needed
 // Fetch bookings for a specific user
 const CarListing = require("../models/CarListing"); // Adjust path as needed
 const ServiceBooking = require("../models/serviceBooking");
+const { extractAccessToken } = require("../middleware/auth");
+const { verifyAccessToken } = require("../utils/token");
+const {
+  extractBidIntentFromPayload,
+  verifyAcceptedBidAccess,
+} = require("../utils/bidApproval");
 
 const db = require("../db");
 const { ObjectId } = require("mongodb");
+
+function getAuthenticatedUserIdFromRequest(req) {
+  const token = extractAccessToken(req);
+
+  if (!token) {
+    return null;
+  }
+
+  try {
+    return verifyAccessToken(token).id;
+  } catch (_error) {
+    return null;
+  }
+}
 
 // Create a new booking
 router.post("/", async (req, res) => {
@@ -45,6 +65,41 @@ router.post("/", async (req, res) => {
   }
 
   try {
+    const bidIntent = extractBidIntentFromPayload(req.body);
+
+    if (bidIntent.wantsBidValidation) {
+      const authenticatedUserId = getAuthenticatedUserIdFromRequest(req);
+
+      if (!authenticatedUserId) {
+        return res.status(401).json({
+          flag: "0",
+          message:
+            "Authentication is required to create a booking with an approved bid.",
+        });
+      }
+
+      if (String(authenticatedUserId) !== String(user_id)) {
+        return res.status(403).json({
+          flag: "0",
+          message: "Approved bid access does not belong to this user.",
+        });
+      }
+
+      const bidApproval = await verifyAcceptedBidAccess({
+        userId: authenticatedUserId,
+        listingIdentifier: bidIntent.listingIdentifier || listing_id || car_id,
+        mode: bidIntent.mode || purpose,
+        expectedAmount: bidIntent.requestedPrice,
+      });
+
+      if (!bidApproval.ok) {
+        return res.status(bidApproval.statusCode).json({
+          flag: "0",
+          message: bidApproval.message,
+        });
+      }
+    }
+
     const newBooking = new Booking({
       listing_id,
       user_id,

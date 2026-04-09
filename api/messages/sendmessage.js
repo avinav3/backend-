@@ -160,31 +160,10 @@ async function getDefaultAdminActor() {
 }
 
 async function getChatActor(req, options = {}) {
-  const {
-    allowDefaultAdmin = false,
-    preferAdminForConversationAccess = false,
-  } = options;
-
   const actor = getRequestActor(req);
 
   if (actor) {
     return actor;
-  }
-
-  if (
-    allowDefaultAdmin ||
-    preferAdminForConversationAccess ||
-    req.query?.conversationId ||
-    req.query?.chatId ||
-    req.params?.conversationId ||
-    req.params?.chatId ||
-    req.body?.conversationId ||
-    req.body?.chatId ||
-    req.body?.receiverId ||
-    req.body?.adminId ||
-    req.query?.adminId
-  ) {
-    return getDefaultAdminActor();
   }
 
   return null;
@@ -657,6 +636,38 @@ function buildConversationResponse(conversation, viewerRole = "admin") {
     createdAt: conversation.createdAt || null,
     updatedAt: conversation.updatedAt || null,
   };
+}
+
+function dedupeConversationsByParticipants(conversations) {
+  const canonicalByParticipantKey = new Map();
+
+  conversations.forEach((conversation) => {
+    const userId = String(conversation.user?._id || conversation.user || "");
+    const adminId = String(conversation.admin?._id || conversation.admin || "");
+    const participantKey = `${userId}:${adminId}`;
+    const existingConversation = canonicalByParticipantKey.get(participantKey);
+
+    if (!existingConversation) {
+      canonicalByParticipantKey.set(participantKey, conversation);
+      return;
+    }
+
+    const preferredConversation = pickCanonicalConversation([
+      existingConversation,
+      conversation,
+    ]);
+    canonicalByParticipantKey.set(participantKey, preferredConversation);
+  });
+
+  return Array.from(canonicalByParticipantKey.values()).sort((left, right) => {
+    const leftTime =
+      normalizeDate(left.lastMessageTime || left.updatedAt || left.createdAt) ||
+      new Date(0);
+    const rightTime =
+      normalizeDate(right.lastMessageTime || right.updatedAt || right.createdAt) ||
+      new Date(0);
+    return rightTime - leftTime;
+  });
 }
 
 function buildDetailedConversationResponse(conversation, viewerRole = "admin") {
@@ -1647,7 +1658,7 @@ async function handleConversationList(req, res) {
       .populate("user", "_id name email")
       .populate("admin", "_id name email")
       .sort({ lastMessageTime: -1, updatedAt: -1 });
-    const responseRows = conversations.map((conversation) =>
+    const responseRows = dedupeConversationsByParticipants(conversations).map((conversation) =>
       buildConversationResponse(conversation, viewerRole),
     );
 
@@ -1828,10 +1839,11 @@ router.get("/chats", async (req, res) => {
       .populate("user", "_id name email")
       .populate("admin", "_id name email")
       .sort({ lastMessageTime: -1, updatedAt: -1 });
+    const canonicalConversations = dedupeConversationsByParticipants(conversations);
 
     return res.status(200).json({
       flag: "1",
-      conversations: conversations.map((conversation) =>
+      conversations: canonicalConversations.map((conversation) =>
         buildConversationResponse(conversation, "admin"),
       ),
     });
@@ -1874,10 +1886,11 @@ router.get("/chat/users", async (req, res) => {
       .populate("user", "_id name email")
       .populate("admin", "_id name email")
       .sort({ lastMessageTime: -1, updatedAt: -1 });
+    const canonicalConversations = dedupeConversationsByParticipants(conversations);
 
     return res.status(200).json({
       flag: "1",
-      users: conversations.map((conversation) =>
+      users: canonicalConversations.map((conversation) =>
         buildConversationResponse(conversation, "admin"),
       ),
     });
@@ -2000,24 +2013,24 @@ router.get("/MessageList", async (req, res) => {
       .json({ flag: "0", message: "Authentication required." });
   }
 
-  if (actor.role === "admin") {
-    const adminOwner = await resolveAdminConversationOwner(actor);
+    if (actor.role === "admin") {
+      const adminOwner = await resolveAdminConversationOwner(actor);
 
-    return Chat.find({ admin: adminOwner?._id })
-      .populate("user", "_id name email")
-      .populate("admin", "_id name email")
-      .sort({ lastMessageTime: -1, updatedAt: -1 })
-      .then((conversations) =>
-        res.status(200).json({
-          flag: "1",
-          users: conversations.map((conversation) =>
-            buildConversationResponse(conversation, "admin"),
-          ),
-          conversations: conversations.map((conversation) =>
-            buildConversationResponse(conversation, "admin"),
-          ),
-        }),
-      )
+      return Chat.find({ admin: adminOwner?._id })
+        .populate("user", "_id name email")
+        .populate("admin", "_id name email")
+        .sort({ lastMessageTime: -1, updatedAt: -1 })
+        .then((conversations) =>
+          res.status(200).json({
+            flag: "1",
+            users: dedupeConversationsByParticipants(conversations).map((conversation) =>
+              buildConversationResponse(conversation, "admin"),
+            ),
+            conversations: dedupeConversationsByParticipants(conversations).map((conversation) =>
+              buildConversationResponse(conversation, "admin"),
+            ),
+          }),
+        )
       .catch((error) => {
         console.error("Fetch MessageList error:", error);
         return res.status(500).json({ flag: "0", message: "Database error" });

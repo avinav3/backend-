@@ -94,6 +94,7 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api", reviewRoutes); // Mount review routes under `/api`
 // Routes
 app.use(require("./api/password-reset"));
+app.use("/api", require("./api/contact"));
 app.use(require("./api/register"));
 app.use(authRoutes);
 app.use(require("./api/change-password"));
